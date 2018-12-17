@@ -1,0 +1,76 @@
+version: 2
+jobs:
+  test:
+    docker:
+      - image: innfactory/gcloud-scala-ci:latest
+    working_directory: ~/repo
+    environment:
+      JVM_OPTS: -Xmx3200m
+      TERM: dumb
+    steps:
+      - checkout
+      - run:
+          name: "test with sbt"
+          command: |
+            sbt test
+
+  build:
+    docker:
+      - image: innfactory/gcloud-scala-ci:latest
+    working_directory: ~/repo
+    environment:
+      JVM_OPTS: -Xmx3200m
+      TERM: dumb
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 17.09.0-ce
+      - run:
+          name: "create google credentials"
+          command: echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
+      - run:
+          name: "configure google cloud"
+          command: |
+            gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
+            gcloud --quiet config set project ${GOOGLE_PROJECT_ID}
+            gcloud --quiet config set compute/zone ${GOOGLE_COMPUTE_ZONE}
+            gcloud --quiet container clusters get-credentials ${GOOGLE_CLUSTER_NAME}
+            gcloud --quiet auth configure-docker
+      - run:
+          name: "build with sbt"
+          command: |
+            sbt -Dbranch=$CIRCLE_BRANCH -Dversion=$CIRCLE_SHA1 docker:publish
+  deploy:
+    docker:
+      - image: innfactory/gcloud-scala-ci:latest
+    working_directory: ~/repo
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 17.09.0-ce
+      - run:
+          name: "create google credentials"
+          command: echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
+      - run:
+          name: "configure google cloud"
+          command: |
+            gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
+            gcloud --quiet config set project ${GOOGLE_PROJECT_ID}
+            gcloud --quiet config set compute/zone ${GOOGLE_COMPUTE_ZONE}
+            gcloud --quiet container clusters get-credentials ${GOOGLE_CLUSTER_NAME}
+            gcloud --quiet auth configure-docker
+      - run:
+          name: "Deploy to Google Kubernetes"
+          command: |
+            chmod +x ./.circleci/deploy.sh
+            ./.circleci/deploy.sh
+workflows:
+  version: 2
+  inntend-pipeline:
+    jobs:
+      - test
+      - build
+      - deploy:
+          requires:
+            - build
+            - test
